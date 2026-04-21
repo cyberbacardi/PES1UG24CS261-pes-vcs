@@ -10,11 +10,15 @@
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
 
 #include "tree.h"
+#include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+int index_load(Index *index);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -129,9 +133,115 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+// Helper function to build a tree for a specific directory level
+// Returns 0 on success, stores tree hash in *tree_id_out
+static int build_tree_recursive(IndexEntry *entries, int count, const char *prefix, ObjectID *tree_id_out) {
+    Tree tree;
+    tree.count = 0;
+
+    int i = 0;
+    while (i < count && tree.count < MAX_TREE_ENTRIES) {
+        const char *path = entries[i].path;
+        
+        // Skip entries that don't belong to this directory level
+        size_t prefix_len = strlen(prefix);
+        if (prefix_len > 0) {
+            if (strncmp(path, prefix, prefix_len) != 0) {
+                i++;
+                continue;
+            }
+            path += prefix_len;
+            if (prefix[prefix_len - 1] != '/' && path[0] != '\0') {
+                i++;
+                continue;
+            }
+            if (path[0] == '/') path++;
+        }
+
+        // Find if this is a file or directory at this level
+        const char *slash = strchr(path, '/');
+        
+        if (slash == NULL) {
+            // This is a file at the current level
+            TreeEntry *entry = &tree.entries[tree.count];
+            entry->mode = entries[i].mode;
+            entry->hash = entries[i].hash;
+            strncpy(entry->name, path, sizeof(entry->name) - 1);
+            entry->name[sizeof(entry->name) - 1] = '\0';
+            tree.count++;
+            i++;
+        } else {
+            // This is a subdirectory - extract directory name
+            size_t dir_name_len = slash - path;
+            char dir_name[256];
+            if (dir_name_len >= sizeof(dir_name)) {
+                return -1;
+            }
+            memcpy(dir_name, path, dir_name_len);
+            dir_name[dir_name_len] = '\0';
+
+            // Check if we already processed this directory
+            int already_added = 0;
+            for (int j = 0; j < tree.count; j++) {
+                if (strcmp(tree.entries[j].name, dir_name) == 0) {
+                    already_added = 1;
+                    break;
+                }
+            }
+
+            if (already_added) {
+                i++;
+                continue;
+            }
+
+            // Build new prefix for subdirectory
+            char new_prefix[512];
+            if (prefix_len > 0) {
+                snprintf(new_prefix, sizeof(new_prefix), "%s%s/", prefix, dir_name);
+            } else {
+                snprintf(new_prefix, sizeof(new_prefix), "%s/", dir_name);
+            }
+
+            // Recursively build subtree
+            ObjectID subtree_hash;
+            if (build_tree_recursive(entries, count, new_prefix, &subtree_hash) != 0) {
+                return -1;
+            }
+
+            // Add directory entry to current tree
+            TreeEntry *entry = &tree.entries[tree.count];
+            entry->mode = 0040000;  // Directory mode
+            entry->hash = subtree_hash;
+            strncpy(entry->name, dir_name, sizeof(entry->name) - 1);
+            entry->name[sizeof(entry->name) - 1] = '\0';
+            tree.count++;
+            i++;
+        }
+    }
+
+    // Serialize and write the tree object
+    void *tree_data;
+    size_t tree_len;
+    if (tree_serialize(&tree, &tree_data, &tree_len) != 0) {
+        return -1;
+    }
+
+    int result = object_write(OBJ_TREE, tree_data, tree_len, tree_id_out);
+    free(tree_data);
+    return result;
+}
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    // Load the index
+    Index index;
+    if (index_load(&index) != 0) {
+        return -1;
+    }
+
+    if (index.count == 0) {
+        fprintf(stderr, "error: nothing to commit (index is empty)\n");
+        return -1;
+    }
+
+    // Build the root tree starting with empty prefix
+    return build_tree_recursive(index.entries, index.count, "", id_out);
 }
