@@ -194,19 +194,16 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // Step 1: Build tree from index
     ObjectID tree_id;
     if (tree_from_index(&tree_id) != 0) {
         fprintf(stderr, "error: failed to create tree from index\n");
         return -1;
     }
-
-    // Step 2: Create commit struct
+ 
     Commit commit;
     commit.tree = tree_id;
 
-    // Step 3: Try to read parent (HEAD) - may not exist for first commit
-    ObjectID parent_id;
+     ObjectID parent_id;
     if (head_read(&parent_id) == 0) {
         commit.parent = parent_id;
         commit.has_parent = 1;
@@ -214,26 +211,22 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
         commit.has_parent = 0;
     }
 
-    // Step 4: Set author and timestamp
-    const char *author = pes_author();
+     const char *author = pes_author();
     strncpy(commit.author, author, sizeof(commit.author) - 1);
     commit.author[sizeof(commit.author) - 1] = '\0';
     
     commit.timestamp = (uint64_t)time(NULL);
 
-    // Step 5: Set commit message
-    strncpy(commit.message, message, sizeof(commit.message) - 1);
+     strncpy(commit.message, message, sizeof(commit.message) - 1);
     commit.message[sizeof(commit.message) - 1] = '\0';
 
-    // Step 6: Serialize the commit
-    void *commit_data;
+     void *commit_data;
     size_t commit_len;
     if (commit_serialize(&commit, &commit_data, &commit_len) != 0) {
         return -1;
     }
 
-    // Step 7: Write commit object to object store
-    ObjectID new_commit_id;
+     ObjectID new_commit_id;
     int result = object_write(OBJ_COMMIT, commit_data, commit_len, &new_commit_id);
     free(commit_data);
     
@@ -241,16 +234,13 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
         return -1;
     }
 
-    // Step 8: Update HEAD to point to new commit
-    if (head_update(&new_commit_id) != 0) {
+     if (head_update(&new_commit_id) != 0) {
         return -1;
     }
 
-    // Step 9: Return the new commit ID
-    *commit_id_out = new_commit_id;
+     *commit_id_out = new_commit_id;
 
-    // Print success message with commit hash
-    char commit_hex[HASH_HEX_SIZE + 1];
+     char commit_hex[HASH_HEX_SIZE + 1];
     hash_to_hex(&new_commit_id, commit_hex);
     printf("[main %.*s] %s\n", 7, commit_hex, message);
 

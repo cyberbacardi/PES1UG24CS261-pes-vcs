@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <dirent.h>
 
+int hex_to_hash(const char *hex, ObjectID *id_out);
+void hash_to_hex(const ObjectID *id, char *hex_out);
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
